@@ -1,0 +1,249 @@
+{
+  "provider": "datadog",
+  "trace_id": "trace-payment-telemetry-009",
+  "environment": "production",
+  "tenant": "bugorbit-enterprise",
+  "incident_hints": [
+    "payment latency regression after canary deploy",
+    "ledger database pool saturation",
+    "gateway checkout timeout burst in us-central"
+  ],
+  "spans": [
+    {
+      "span_id": "span-001",
+      "service": "api-gateway",
+      "operation": "POST /checkout",
+      "status": "ok",
+      "duration_ms": 120,
+      "metadata": {
+        "route_group": "checkout",
+        "release_ring": "stable"
+      }
+    },
+    {
+      "span_id": "span-002",
+      "parent_id": "span-001",
+      "service": "payment-service",
+      "operation": "authorizeCharge",
+      "status": "error",
+      "duration_ms": 960,
+      "error_type": "TimeoutError",
+      "metadata": {
+        "payment_provider": "stripe",
+        "retry_attempt": 3
+      }
+    },
+    {
+      "span_id": "span-003",
+      "parent_id": "span-002",
+      "service": "ledger-service",
+      "operation": "writeTransaction",
+      "status": "error",
+      "duration_ms": 1210,
+      "error_type": "PoolTimeoutException",
+      "metadata": {
+        "db_cluster": "ledger-primary",
+        "shard": "tx-04"
+      }
+    },
+    {
+      "span_id": "span-004",
+      "parent_id": "span-002",
+      "service": "fraud-service",
+      "operation": "scorePaymentRisk",
+      "status": "ok",
+      "duration_ms": 210
+    }
+  ],
+  "logs": [
+    {
+      "log_id": "log-001",
+      "timestamp": "2026-04-02T19:28:11Z",
+      "service": "payment-service",
+      "level": "ERROR",
+      "message": "Authorization exceeded retry budget while awaiting ledger ack",
+      "logger": "payments.authorizer",
+      "trace_id": "trace-payment-telemetry-009",
+      "span_id": "span-002",
+      "environment": "production",
+      "region": "us-central-1",
+      "tags": [
+        {
+          "key": "team",
+          "value": "payments"
+        },
+        {
+          "key": "priority",
+          "value": "p1"
+        }
+      ],
+      "context": {
+        "retry_budget_remaining": 0,
+        "order_id": "ord-88219",
+        "customer_tier": "enterprise"
+      }
+    },
+    {
+      "log_id": "log-002",
+      "timestamp": "2026-04-02T19:28:10Z",
+      "service": "ledger-service",
+      "level": "ERROR",
+      "message": "Connection pool exhausted for writeTransaction",
+      "logger": "ledger.db.pool",
+      "trace_id": "trace-payment-telemetry-009",
+      "span_id": "span-003",
+      "environment": "production",
+      "region": "us-central-1",
+      "tags": [
+        {
+          "key": "cluster",
+          "value": "ledger-primary"
+        },
+        {
+          "key": "symptom",
+          "value": "pool-exhaustion"
+        }
+      ],
+      "context": {
+        "active_connections": 200,
+        "waiting_requests": 83
+      }
+    }
+  ],
+  "metrics": [
+    {
+      "metric_id": "metric-001",
+      "timestamp": "2026-04-02T19:28:00Z",
+      "service": "payment-service",
+      "name": "payment.auth.latency.p95",
+      "value": 2890,
+      "unit": "ms",
+      "aggregation": "p95",
+      "source": "datadog",
+      "dimensions": {
+        "region": "us-central-1",
+        "env": "production"
+      }
+    },
+    {
+      "metric_id": "metric-002",
+      "timestamp": "2026-04-02T19:28:00Z",
+      "service": "ledger-service",
+      "name": "ledger.db.connection_pool.utilization",
+      "value": 97,
+      "unit": "percent",
+      "aggregation": "avg",
+      "source": "datadog",
+      "dimensions": {
+        "cluster": "ledger-primary",
+        "env": "production"
+      }
+    },
+    {
+      "metric_id": "metric-003",
+      "timestamp": "2026-04-02T19:28:00Z",
+      "service": "api-gateway",
+      "name": "gateway.checkout.error_rate",
+      "value": 18.4,
+      "unit": "percent",
+      "aggregation": "avg",
+      "source": "datadog",
+      "dimensions": {
+        "route": "/checkout",
+        "env": "production"
+      }
+    }
+  ],
+  "alerts": [
+    {
+      "alert_id": "alert-001",
+      "source": "datadog",
+      "name": "P1 Payment Authorization Timeout Burst",
+      "severity": "critical",
+      "state": "triggered",
+      "service": "payment-service",
+      "description": "Payment authorization timeout rate exceeded 15% for 10 minutes.",
+      "triggered_at": "2026-04-02T19:26:00Z",
+      "runbook_url": "https://runbooks.bugorbit.ai/payments/timeout-burst",
+      "signal_type": "apm",
+      "labels": {
+        "team": "payments",
+        "pager": "primary"
+      }
+    },
+    {
+      "alert_id": "alert-002",
+      "source": "datadog",
+      "name": "Ledger DB Pool Saturation",
+      "severity": "critical",
+      "state": "triggered",
+      "service": "ledger-service",
+      "description": "Connection pool utilization has stayed above 95% for 8 minutes.",
+      "triggered_at": "2026-04-02T19:25:30Z",
+      "runbook_url": "https://runbooks.bugorbit.ai/ledger/pool-saturation",
+      "signal_type": "infrastructure",
+      "labels": {
+        "cluster": "ledger-primary",
+        "escalation": "database-sre"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "error_id": "err-001",
+      "timestamp": "2026-04-02T19:28:10Z",
+      "service": "ledger-service",
+      "error_class": "PoolTimeoutException",
+      "error_message": "Timed out waiting for database connection from pool",
+      "handled": false,
+      "count": 84,
+      "endpoint": "writeTransaction",
+      "stacktrace": [
+        "at com.bugorbit.ledger.ConnectionPool.borrow(ConnectionPool.java:188)",
+        "at com.bugorbit.ledger.TransactionWriter.write(TransactionWriter.java:74)"
+      ],
+      "attributes": {
+        "pool_name": "ledger-primary-writer",
+        "timeout_ms": 3000
+      }
+    }
+  ],
+  "deployments": [
+    {
+      "deployment_id": "dep-001",
+      "service": "payment-service",
+      "version": "2026.04.02-rc3",
+      "environment": "production",
+      "deployed_at": "2026-04-02T18:55:00Z",
+      "commit_sha": "a91be77",
+      "actor": "github-actions",
+      "strategy": "canary",
+      "change_summary": "Adjusted retry strategy and auth ledger acknowledgment timeout."
+    },
+    {
+      "deployment_id": "dep-002",
+      "service": "ledger-service",
+      "version": "2026.04.02-hotfix1",
+      "environment": "production",
+      "deployed_at": "2026-04-02T17:40:00Z",
+      "commit_sha": "bc19df2",
+      "actor": "db-release-bot",
+      "strategy": "rolling",
+      "change_summary": "Increased transaction audit logging and changed pool sizing defaults."
+    }
+  ],
+  "host_signals": [
+    {
+      "host_id": "host-001",
+      "hostname": "ledger-node-4",
+      "service": "ledger-service",
+      "region": "us-central-1",
+      "cpu_pct": 92.1,
+      "memory_pct": 86.4,
+      "disk_pct": 68.2,
+      "network_error_rate": 3.8,
+      "pod_restarts": 2,
+      "node_status": "degraded"
+    }
+  ]
+}

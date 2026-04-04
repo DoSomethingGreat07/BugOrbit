@@ -1,0 +1,90 @@
+{
+  "provider": "opentelemetry",
+  "traceId": "otel-trace-checkout-001",
+  "serviceName": "api-gateway",
+  "environment": "production",
+  "tenant": "rocketride-enterprise",
+  "resourceAttributes": {
+    "service.name": "api-gateway",
+    "deployment.environment": "production",
+    "cloud.region": "us-central-1"
+  },
+  "incidentHints": [
+    "live telemetry stream from otel exporter",
+    "checkout timeouts increased after deploy"
+  ],
+  "spans": [
+    {
+      "spanId": "span-001",
+      "name": "POST /checkout",
+      "status": "ok",
+      "durationMs": 120,
+      "attributes": {
+        "http.method": "POST",
+        "http.route": "/checkout",
+        "service.name": "api-gateway"
+      }
+    },
+    {
+      "traceId": "otel-trace-checkout-001",
+      "spanId": "span-002",
+      "parentSpanId": "span-001",
+      "serviceName": "payment-service",
+      "name": "authorizeCharge",
+      "status": "error",
+      "durationMs": 960,
+      "attributes": {
+        "service.name": "payment-service",
+        "error.type": "TimeoutError"
+      },
+      "events": [
+        {
+          "name": "exception",
+          "timestamp": "2026-04-02T19:28:11Z",
+          "attributes": {
+            "exception.type": "TimeoutError",
+            "exception.message": "Ledger ack timed out"
+          }
+        }
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "timestamp": "2026-04-02T19:28:10Z",
+      "serviceName": "ledger-service",
+      "level": "error",
+      "message": "Connection pool exhausted for writeTransaction",
+      "attributes": {
+        "cluster": "ledger-primary",
+        "symptom": "pool-exhaustion"
+      }
+    }
+  ],
+  "metrics": [
+    {
+      "timestamp": "2026-04-02T19:28:00Z",
+      "serviceName": "ledger-service",
+      "name": "ledger.db.connection_pool.utilization",
+      "value": 97,
+      "unit": "percent",
+      "aggregation": "avg",
+      "attributes": {
+        "cluster": "ledger-primary",
+        "env": "production"
+      }
+    }
+  ],
+  "alerts": [
+    {
+      "source": "datadog",
+      "name": "Ledger DB Pool Saturation",
+      "severity": "critical",
+      "state": "triggered",
+      "serviceName": "ledger-service",
+      "description": "Database connection pool utilization exceeded 95%.",
+      "triggeredAt": "2026-04-02T19:26:00Z",
+      "signalType": "metric"
+    }
+  ]
+}

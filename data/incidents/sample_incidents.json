@@ -1,0 +1,41 @@
+[
+  {
+    "incident_id": "INC-101",
+    "title": "Payment timeout during card authorization",
+    "summary": "Checkout requests failed because payment-service retried a slow ledger dependency until the gateway timed out.",
+    "symptoms": ["payment timeout", "504 errors", "slow ledger writes"],
+    "root_cause": "A latency spike in ledger-service exhausted the payment-service retry budget and caused upstream checkout failures.",
+    "fix": [
+      "Throttle retries in payment-service.",
+      "Add circuit breaking for ledger-service.",
+      "Scale ledger-service consumers and review slow queries."
+    ],
+    "services": ["payment-service", "ledger-service", "checkout-service"]
+  },
+  {
+    "incident_id": "INC-102",
+    "title": "Inventory stale reads after deploy",
+    "summary": "inventory-service served stale stock data after a cache invalidation regression.",
+    "symptoms": ["oversell", "stale inventory", "cache mismatch"],
+    "root_cause": "A deploy removed a cache invalidation call, so inventory-service returned stale quantities until TTL expiry.",
+    "fix": [
+      "Restore cache invalidation on stock update.",
+      "Backfill affected inventory records.",
+      "Add regression tests around stock mutations."
+    ],
+    "services": ["inventory-service", "cart-service", "catalog-db"]
+  },
+  {
+    "incident_id": "INC-103",
+    "title": "API gateway auth fan-out failure",
+    "summary": "api-gateway propagated auth-service failures to multiple user-facing routes.",
+    "symptoms": ["401 spike", "gateway failure", "auth dependency error"],
+    "root_cause": "auth-service returned intermittent token validation errors, which caused api-gateway request fan-out failures.",
+    "fix": [
+      "Roll back the auth-service config change.",
+      "Add a fallback token validation path.",
+      "Increase alerting on gateway-auth dependency health."
+    ],
+    "services": ["api-gateway", "auth-service", "search-service"]
+  }
+]

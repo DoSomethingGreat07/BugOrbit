@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+backend/.env
+frontend/.env
+frontend/.env.local
+*.log
+data/incidents/runtime_state.json
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+.rocketride/
