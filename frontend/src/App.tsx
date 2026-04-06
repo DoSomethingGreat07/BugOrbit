@@ -1104,8 +1104,8 @@ function App() {
   });
 
   const currentIncidentId = result?.structured_trace.trace_id ?? "";
-  const currentIncidentFixEntries = fixEntries.filter((entry) => entry.incidentId === currentIncidentId);
-  const localCurrentIncident = buildCurrentIncident(result, submittedTrace, currentIncidentFixEntries);
+  const traceScopedFixEntries = fixEntries.filter((entry) => entry.incidentId === currentIncidentId);
+  const localCurrentIncident = buildCurrentIncident(result, submittedTrace, traceScopedFixEntries);
   const currentIncident =
     activeIncidentRecords.find((incident) => incident.sourceTraceId === currentIncidentId) ??
     resolvedIncidentRecords.find((incident) => incident.sourceTraceId === currentIncidentId) ??
@@ -1186,14 +1186,27 @@ function App() {
     setSimulationRun(buildSimulationScenario(simulationService, simulationFailure, result, submittedTrace));
   }, [simulationService, simulationFailure, result, submittedTrace]);
 
+  function applyIncidentStateSnapshot(snapshot: Awaited<ReturnType<typeof fetchIncidentState>>) {
+    const mappedActive = snapshot.active.map(mapRuntimeIncident);
+    const mappedResolved = snapshot.resolved.map(mapRuntimeIncident);
+    setIncidentStateError(null);
+    setActiveIncidentRecords(mappedActive);
+    setResolvedIncidentRecords(mappedResolved);
+    setSelectedLiveIncidentId((current) => {
+      if (mappedActive.some((incident) => incident.id === current)) return current;
+      const preferred =
+        mappedActive.find((incident) => incident.sourceTraceId === currentIncidentId) ?? mappedActive[0] ?? null;
+      return preferred?.id ?? "";
+    });
+    setSelectedResolvedId((current) => {
+      if (mappedResolved.some((incident) => incident.id === current)) return current;
+      return mappedResolved[0]?.id ?? "";
+    });
+  }
+
   async function refreshIncidentState() {
     const snapshot = await fetchIncidentState();
-    setIncidentStateError(null);
-    setActiveIncidentRecords(snapshot.active.map(mapRuntimeIncident));
-    setResolvedIncidentRecords(snapshot.resolved.map(mapRuntimeIncident));
-    if (snapshot.resolved.length > 0 && !snapshot.resolved.some((incident) => incident.id === selectedResolvedId)) {
-      setSelectedResolvedId(snapshot.resolved[0].id);
-    }
+    applyIncidentStateSnapshot(snapshot);
   }
 
   async function refreshIncidentStateSafely() {
@@ -1212,9 +1225,9 @@ function App() {
 
   useEffect(() => {
     if (fixForm.incidentId) return;
-    if (!currentIncidentId) return;
-    setFixForm((current) => ({ ...current, incidentId: currentIncidentId }));
-  }, [currentIncidentId, fixForm.incidentId]);
+    if (!selectedLiveIncident?.id) return;
+    setFixForm((current) => ({ ...current, incidentId: selectedLiveIncident.id }));
+  }, [selectedLiveIncident?.id, fixForm.incidentId]);
 
   useEffect(() => {
     if (resolvedIncidents.some((incident) => incident.id === selectedResolvedId)) return;
@@ -1318,7 +1331,7 @@ function App() {
       timestamp: new Date().toISOString()
     };
     try {
-      await recordIncidentFix({
+      const snapshot = await recordIncidentFix({
         incident_id: fixForm.incidentId,
         action_taken: entry.actionTaken,
         result: entry.result,
@@ -1327,6 +1340,7 @@ function App() {
         final_resolution: entry.finalResolution,
         actor: "operator"
       });
+      applyIncidentStateSnapshot(snapshot);
       setFixSubmitSuccess(
         entry.finalResolution
           ? `Fix recorded and incident ${entry.incidentId} moved to resolved.`
@@ -1338,13 +1352,13 @@ function App() {
       setFixSubmitSuccess(`Fix step saved locally for incident ${entry.incidentId}.`);
     } finally {
       setFixEntries((current) => [...current, entry]);
-      await refreshIncidentStateSafely();
       if (entry.finalResolution) {
         setSelectedResolvedId(entry.incidentId);
+        setSelectedLiveIncidentId("");
         setActiveView("resolved");
       }
       setFixForm({
-        incidentId: fixForm.incidentId,
+        incidentId: entry.finalResolution ? "" : fixForm.incidentId,
         actionTaken: "",
         result: "Success",
         feedback: "Improved",
