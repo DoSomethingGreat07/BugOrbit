@@ -213,6 +213,7 @@ export type RuntimeSimilarIncident = {
 
 export type RuntimeIncidentRecord = {
   id: string;
+  source_trace_id?: string | null;
   title: string;
   primary_service: string;
   severity: string;

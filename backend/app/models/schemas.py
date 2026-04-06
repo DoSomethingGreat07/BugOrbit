@@ -309,6 +309,7 @@ class RuntimeSimilarIncident(BaseModel):
 
 class RuntimeIncidentRecord(BaseModel):
     id: str
+    source_trace_id: str | None = None
     title: str
     primary_service: str
     severity: str

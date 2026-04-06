@@ -68,6 +68,7 @@ type TimelineEvent = {
 
 type IncidentRecord = {
   id: string;
+  sourceTraceId?: string;
   title: string;
   primaryService: string;
   severity: "critical" | "high" | "medium";
@@ -745,22 +746,27 @@ function buildSimulationScenario(
   service: string,
   failureType: string,
   result: FinalAnalysisResponse | null,
-  payload: TraceRequest
+  payload: TraceRequest | null
 ): SimulationScenario {
+  const fallbackPayload = payload ?? {
+    spans: [],
+    alerts: [],
+    incident_hints: []
+  };
   if (!result) {
     return {
       service,
       failureType,
       predictedCascade: uniqueItems([
         service,
-        ...payload.spans
+        ...fallbackPayload.spans
           .filter((span) => span.service !== service)
           .map((span) => span.service)
           .slice(0, 4)
       ]),
       expectedFixes: uniqueItems([
-        ...payload.incident_hints ?? [],
-        ...payload.alerts?.map((alert) => alert.runbook_url ?? alert.name) ?? []
+        ...fallbackPayload.incident_hints ?? [],
+        ...fallbackPayload.alerts?.map((alert) => alert.runbook_url ?? alert.name) ?? []
       ]).slice(0, 4)
     };
   }
@@ -834,10 +840,10 @@ function buildSimulationScenario(
 
 function buildCurrentIncident(
   result: FinalAnalysisResponse | null,
-  payload: TraceRequest,
+  payload: TraceRequest | null,
   fixEntries: FixEntry[]
 ): IncidentRecord | null {
-  if (!result) return null;
+  if (!result || !payload) return null;
 
   const affectedServices = buildRiskModel(result, payload);
   const propagationPath = affectedServices.map((item) => item.service);
@@ -912,6 +918,7 @@ function buildCurrentIncident(
 function mapRuntimeIncident(incident: RuntimeIncidentRecord): IncidentRecord {
   return {
     id: incident.id,
+    sourceTraceId: incident.source_trace_id ?? undefined,
     title: incident.title,
     primaryService: incident.primary_service,
     severity: incident.severity as IncidentRecord["severity"],
@@ -1052,14 +1059,15 @@ function App() {
   const [activeView, setActiveView] = useState<NavView>("dashboard");
   const [activePipelineStage, setActivePipelineStage] = useState<PipelineStageId>("telemetry");
   const [pipelineState, setPipelineState] = useState<Record<PipelineStageId, StageStatus>>(initialStageState);
-  const [traceInput, setTraceInput] = useState(JSON.stringify(sampleTrace, null, 2));
-  const [submittedTrace, setSubmittedTrace] = useState<TraceRequest>(sampleTrace);
+  const [traceInput, setTraceInput] = useState("");
+  const [submittedTrace, setSubmittedTrace] = useState<TraceRequest | null>(null);
   const [result, setResult] = useState<FinalAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedService, setSelectedService] = useState("ledger-service");
-  const [selectedResolvedId, setSelectedResolvedId] = useState(resolvedIncidentSeed[0]?.id ?? "");
+  const [selectedResolvedId, setSelectedResolvedId] = useState("");
+  const [selectedLiveIncidentId, setSelectedLiveIncidentId] = useState("");
   const [resolvedSearch, setResolvedSearch] = useState("");
   const [resolvedSeverityFilter, setResolvedSeverityFilter] = useState("all");
   const [resolvedResolutionTypeFilter, setResolvedResolutionTypeFilter] = useState("all");
@@ -1072,7 +1080,8 @@ function App() {
   const [simulationFailure, setSimulationFailure] = useState("DB Timeout");
   const [simulationRun, setSimulationRun] = useState<SimulationScenario | null>(null);
   const [activeIncidentRecords, setActiveIncidentRecords] = useState<IncidentRecord[]>([]);
-  const [resolvedIncidentRecords, setResolvedIncidentRecords] = useState<IncidentRecord[]>(resolvedIncidentSeed);
+  const [resolvedIncidentRecords, setResolvedIncidentRecords] = useState<IncidentRecord[]>([]);
+  const [incidentStateError, setIncidentStateError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [fixSubmitError, setFixSubmitError] = useState<string | null>(null);
   const [fixSubmitSuccess, setFixSubmitSuccess] = useState<string | null>(null);
@@ -1098,14 +1107,20 @@ function App() {
   const currentIncidentFixEntries = fixEntries.filter((entry) => entry.incidentId === currentIncidentId);
   const localCurrentIncident = buildCurrentIncident(result, submittedTrace, currentIncidentFixEntries);
   const currentIncident =
-    activeIncidentRecords.find((incident) => incident.id === currentIncidentId) ??
-    resolvedIncidentRecords.find((incident) => incident.id === currentIncidentId) ??
+    activeIncidentRecords.find((incident) => incident.sourceTraceId === currentIncidentId) ??
+    resolvedIncidentRecords.find((incident) => incident.sourceTraceId === currentIncidentId) ??
     localCurrentIncident;
+  const dashboardIncident = result && submittedTrace ? currentIncident : null;
   const resolvedIncidents = resolvedIncidentRecords;
   const selectedResolvedIncident =
     resolvedIncidents.find((incident) => incident.id === selectedResolvedId) ?? resolvedIncidents[0] ?? null;
-  const activeIncidents = activeIncidentRecords.length > 0 ? activeIncidentRecords : currentIncident && currentIncident.status === "active" ? [currentIncident] : [];
-  const displayedIncident = activeView === "resolved" ? selectedResolvedIncident : activeIncidents[0] ?? currentIncident;
+  const activeIncidents = activeIncidentRecords;
+  const selectedLiveIncident =
+    activeIncidents.find((incident) => incident.id === selectedLiveIncidentId) ??
+    activeIncidents.find((incident) => incident.sourceTraceId === currentIncidentId) ??
+    activeIncidents[0] ??
+    currentIncident;
+  const displayedIncident = activeView === "resolved" ? selectedResolvedIncident : selectedLiveIncident;
   const systemStatus = displayedIncident ? statusTone(displayedIncident.severity) : "healthy";
   const allIncidents = [...activeIncidents, ...resolvedIncidents];
   const filteredLiveIncidents = activeIncidents.filter((incident) => {
@@ -1158,7 +1173,7 @@ function App() {
   const simulationServiceOptions = uniqueItems([
     simulationService,
     result?.trace_analysis.failure_point,
-    ...submittedTrace.spans.map((span) => span.service),
+    ...(submittedTrace?.spans.map((span) => span.service) ?? []),
     ...result?.graph_result.affected_services ?? [],
     ...result?.impact_analysis.blast_radius ?? []
   ]);
@@ -1173,12 +1188,10 @@ function App() {
 
   async function refreshIncidentState() {
     const snapshot = await fetchIncidentState();
+    setIncidentStateError(null);
     setActiveIncidentRecords(snapshot.active.map(mapRuntimeIncident));
-    setResolvedIncidentRecords([
-      ...snapshot.resolved.map(mapRuntimeIncident),
-      ...resolvedIncidentSeed.filter((seed) => !snapshot.resolved.some((item) => item.id === seed.id))
-    ]);
-    if (snapshot.resolved.length > 0 && !selectedResolvedId) {
+    setResolvedIncidentRecords(snapshot.resolved.map(mapRuntimeIncident));
+    if (snapshot.resolved.length > 0 && !snapshot.resolved.some((incident) => incident.id === selectedResolvedId)) {
       setSelectedResolvedId(snapshot.resolved[0].id);
     }
   }
@@ -1186,8 +1199,10 @@ function App() {
   async function refreshIncidentStateSafely() {
     try {
       await refreshIncidentState();
-    } catch {
-      // Keep the analysis pipeline usable even if lifecycle endpoints are unavailable.
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Unable to refresh live incident state from the backend.";
+      setIncidentStateError(`${message} Dashboard analysis can still render locally, but Live and Resolved incident views may be out of date.`);
     }
   }
 
@@ -1205,6 +1220,13 @@ function App() {
     if (resolvedIncidents.some((incident) => incident.id === selectedResolvedId)) return;
     if (resolvedIncidents[0]) setSelectedResolvedId(resolvedIncidents[0].id);
   }, [resolvedIncidents, selectedResolvedId]);
+
+  useEffect(() => {
+    if (activeIncidents.some((incident) => incident.id === selectedLiveIncidentId)) return;
+    const preferredIncident =
+      activeIncidents.find((incident) => incident.sourceTraceId === currentIncidentId) ?? activeIncidents[0] ?? null;
+    setSelectedLiveIncidentId(preferredIncident?.id ?? "");
+  }, [activeIncidents, currentIncidentId, selectedLiveIncidentId]);
 
   async function runPipelineAnalysis(payload: TraceRequest, nextView: NavView) {
     setLoading(true);
@@ -1266,6 +1288,10 @@ function App() {
   }
 
   async function handleAnalyze() {
+    if (!traceInput.trim()) {
+      setError("Paste a telemetry payload before running analysis.");
+      return;
+    }
     const payload = JSON.parse(traceInput) as TraceRequest;
     await runPipelineAnalysis(payload, "dashboard");
   }
@@ -1467,6 +1493,7 @@ function App() {
   function renderSystemOverviewLayer() {
     const meanTimeToResolution = resolvedOverview.averageResolutionTime;
     const meanTimeToDetection = 6;
+    const hasSubmittedPayload = Boolean(submittedTrace && result);
     return (
       <section className="mission-layer">
         <div className="mission-layer__header">
@@ -1480,33 +1507,33 @@ function App() {
           {[
             {
               label: "Total Services",
-              value: new Set((submittedTrace.spans ?? []).map((span) => span.service)).size,
+              value: hasSubmittedPayload ? new Set((submittedTrace?.spans ?? []).map((span) => span.service)).size : 0,
               trend: "+3%",
               meta: `MTTD ${meanTimeToDetection}m`
             },
             {
               label: "Active Incidents",
-              value: activeIncidents.length,
-              trend: activeIncidents.length > 0 ? "+1" : "0",
-              meta: `Search scope ${allIncidents.length}`
+              value: hasSubmittedPayload ? activeIncidents.length : 0,
+              trend: hasSubmittedPayload && activeIncidents.length > 0 ? "+1" : "0",
+              meta: hasSubmittedPayload ? `Search scope ${allIncidents.length}` : "Analyze telemetry to populate"
             },
             {
               label: "Resolved Incidents",
-              value: resolvedIncidents.length,
+              value: hasSubmittedPayload ? resolvedIncidents.length : 0,
               trend: "+2 this week",
-              meta: `MTTR ${meanTimeToResolution}m`
+              meta: hasSubmittedPayload ? `MTTR ${meanTimeToResolution}m` : "No session data yet"
             },
             {
               label: "High-Risk Services",
-              value: displayedIncident?.affectedServices.filter((service) => service.riskScore >= 75).length ?? 0,
-              trend: displayedIncident ? "-1" : "0",
-              meta: "Risk score descending"
+              value: dashboardIncident?.affectedServices.filter((service) => service.riskScore >= 75).length ?? 0,
+              trend: dashboardIncident ? "-1" : "0",
+              meta: hasSubmittedPayload ? "Risk score descending" : "Awaiting analysis"
             },
             {
               label: "Recent Deployments",
-              value: submittedTrace.deployments?.length ?? 0,
+              value: submittedTrace?.deployments?.length ?? 0,
               trend: "+canary",
-              meta: "Last 24 hours"
+              meta: hasSubmittedPayload ? "Last 24 hours" : "No payload submitted"
             }
           ].map((card) => (
             <article className="overview-card" key={card.label}>
@@ -1529,6 +1556,8 @@ function App() {
   }
 
   function renderTelemetryLayer() {
+    const hasTelemetry = Boolean(submittedTrace);
+    const telemetry = submittedTrace;
     return (
       <section className="mission-layer">
         <div className="mission-layer__header">
@@ -1551,6 +1580,9 @@ function App() {
                   runPipelineAnalysis(sampleTrace, "dashboard");
                 }} disabled={loading}>
                   {loading ? "Analyzing..." : "Load and Analyze Payload"}
+                </button>
+                <button type="button" className="ghost-button" onClick={handleAnalyze} disabled={loading || !traceInput.trim()}>
+                  Run Current Payload
                 </button>
               </div>
             </div>
@@ -1583,15 +1615,16 @@ function App() {
               ))}
             </div>
             <div className="signal-feed">
-              {telemetryView === "logs" &&
-                (submittedTrace.logs ?? []).map((entry) => (
+              {!hasTelemetry ? <p className="muted">No payload submitted yet. Paste telemetry JSON and run analysis.</p> : null}
+              {hasTelemetry && telemetryView === "logs" &&
+                (telemetry?.logs ?? []).map((entry) => (
                   <div className="signal-feed__row" key={entry.log_id}>
                     <strong>{entry.service}</strong>
                     <span>{entry.message}</span>
                   </div>
                 ))}
-              {telemetryView === "metrics" &&
-                (submittedTrace.metrics ?? []).map((metric) => (
+              {hasTelemetry && telemetryView === "metrics" &&
+                (telemetry?.metrics ?? []).map((metric) => (
                   <div className="metric-row" key={metric.metric_id}>
                     <div>
                       <strong>{metric.name}</strong>
@@ -1602,15 +1635,15 @@ function App() {
                     </div>
                   </div>
                 ))}
-              {telemetryView === "alerts" &&
-                (submittedTrace.alerts ?? []).map((alert) => (
+              {hasTelemetry && telemetryView === "alerts" &&
+                (telemetry?.alerts ?? []).map((alert) => (
                   <div className="signal-feed__row" key={alert.alert_id}>
                     <strong>{alert.name}</strong>
                     <span>{formatDate(alert.triggered_at)}</span>
                   </div>
                 ))}
-              {telemetryView === "traces" &&
-                (submittedTrace.spans ?? []).map((span) => (
+              {hasTelemetry && telemetryView === "traces" &&
+                (telemetry?.spans ?? []).map((span) => (
                   <div className="signal-feed__row" key={span.span_id}>
                     <strong>{span.service}</strong>
                     <span>{span.operation}</span>
@@ -2007,11 +2040,11 @@ function App() {
       <>
         {renderSystemOverviewLayer()}
         {renderTelemetryLayer()}
-        {renderGraphLayer()}
-        {renderReasoningLayer()}
-        {renderRiskLayer()}
-        {renderFixLayer()}
-        {renderLearningLayer()}
+        {dashboardIncident ? renderGraphLayer() : null}
+        {dashboardIncident ? renderReasoningLayer() : null}
+        {dashboardIncident ? renderRiskLayer() : null}
+        {dashboardIncident ? renderFixLayer() : null}
+        {dashboardIncident ? renderLearningLayer() : null}
       </>
     );
   }
@@ -2076,14 +2109,22 @@ function App() {
                 <span>Started</span>
               </div>
               {filteredLiveIncidents.map((incident) => (
-                <div className="incident-table__row" key={incident.id}>
+                <button
+                  type="button"
+                  className={`incident-table__row ${displayedIncident?.id === incident.id ? "is-active" : ""}`}
+                  key={incident.id}
+                  onClick={() => {
+                    setSelectedLiveIncidentId(incident.id);
+                    setFixForm((current) => ({ ...current, incidentId: incident.id }));
+                  }}
+                >
                   <span>{incident.id}</span>
                   <span>{incident.primaryService}</span>
                   <span className={`severity-tag severity-tag--${incident.severity}`}>{incident.severity}</span>
                   <span>{incident.status}</span>
                   <span>{incident.affectedServicesCount}</span>
                   <span>{formatDate(incident.timeStarted)}</span>
-                </div>
+                </button>
               ))}
             </div>
           </article>
@@ -2094,23 +2135,23 @@ function App() {
                 <p>Focused command-center view for the currently active incident.</p>
               </div>
             </div>
-            {currentIncident ? (
+            {displayedIncident ? (
               <div className="detail-grid">
                 <div className="detail-chip">
                   <span>Primary Service</span>
-                  <strong>{currentIncident.primaryService}</strong>
+                  <strong>{displayedIncident.primaryService}</strong>
                 </div>
                 <div className="detail-chip">
                   <span>Recent Deployment</span>
-                  <strong>{currentIncident.recentDeployment}</strong>
+                  <strong>{displayedIncident.recentDeployment}</strong>
                 </div>
                 <div className="detail-chip">
                   <span>Suspected Error</span>
-                  <strong>{currentIncident.suspectedError}</strong>
+                  <strong>{displayedIncident.suspectedError}</strong>
                 </div>
                 <div className="detail-chip">
                   <span>Signals</span>
-                  <strong>{currentIncident.alertSignals.join(", ")}</strong>
+                  <strong>{displayedIncident.alertSignals.join(", ")}</strong>
                 </div>
               </div>
             ) : null}
@@ -2891,6 +2932,7 @@ function App() {
 
           {renderPipeline()}
           {error ? <div className="error-banner">{error}</div> : null}
+          {incidentStateError ? <div className="error-banner">{incidentStateError}</div> : null}
           {renderWorkspace()}
         </main>
 

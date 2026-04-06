@@ -5,6 +5,7 @@ from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
+from uuid import uuid4
 
 from app.db.neo4j import Neo4jService
 from app.models.schemas import (
@@ -43,9 +44,6 @@ class IncidentStateService:
     ) -> RuntimeIncidentRecord:
         incident = self._build_incident_from_analysis(request, response)
         with self._lock:
-            existing = self._active.get(incident.id) or self._resolved.get(incident.id)
-            if existing:
-                incident.resolution_steps = existing.resolution_steps
             target = self._resolved if incident.status == "resolved" else self._active
             other = self._active if target is self._resolved else self._resolved
             other.pop(incident.id, None)
@@ -119,7 +117,8 @@ class IncidentStateService:
         time_started = request.alerts[0].triggered_at if request.alerts else self._now_iso()
 
         return RuntimeIncidentRecord(
-            id=structured_trace.trace_id,
+            id=self._incident_id(structured_trace.trace_id),
+            source_trace_id=structured_trace.trace_id,
             title="Live incident analysis",
             primary_service=trace_analysis.failure_point,
             severity=impact_analysis.severity,
@@ -258,6 +257,9 @@ class IncidentStateService:
 
     def _now_iso(self) -> str:
         return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _incident_id(self, trace_id: str) -> str:
+        return f"{trace_id}-{uuid4().hex[:8]}"
 
 
 incident_state_service = IncidentStateService()
