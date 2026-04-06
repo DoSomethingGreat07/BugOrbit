@@ -12,6 +12,7 @@ from neo4j.exceptions import Neo4jError
 from app.core.config import settings
 from app.models.schemas import (
     AlertRecord,
+    GraphFixHistoryRecord,
     GraphQueryResult,
     HostSignalRecord,
     ImpactAnalysis,
@@ -393,6 +394,62 @@ class Neo4jService:
                 )
             )
         self._run_write_batch(operations)
+
+    def query_fix_history(
+        self,
+        services: list[str],
+        error_type: str | None = None,
+        limit: int = 5,
+    ) -> list[GraphFixHistoryRecord]:
+        service_names = [service for service in services if service]
+        if not service_names:
+            return []
+
+        records = self._run_read(
+            """
+            MATCH (inc:Incident)-[:HAS_FIX_ACTION]->(fix:FixAction)
+            OPTIONAL MATCH (inc)-[:AFFECTS]->(svc:Service)
+            WITH inc, fix, collect(DISTINCT svc.name) AS service_names
+            WHERE any(name IN service_names WHERE name IN $services)
+               OR inc.primary_service IN $services
+               OR inc.root_cause_service IN $services
+               OR ($error_type IS NOT NULL AND inc.root_cause CONTAINS $error_type)
+            RETURN inc.incident_id AS incident_id,
+                   inc.primary_service AS primary_service,
+                   inc.root_cause_service AS root_cause_service,
+                   inc.status AS status,
+                   inc.final_resolution AS final_resolution,
+                   inc.root_cause AS root_cause,
+                   fix.action AS fix_action,
+                   fix.feedback AS feedback,
+                   fix.result AS result,
+                   fix.timestamp AS timestamp,
+                   service_names
+            ORDER BY fix.timestamp DESC
+            LIMIT $limit
+            """,
+            {"services": service_names, "error_type": error_type, "limit": limit},
+        )
+        if not records:
+            return []
+
+        return [
+            GraphFixHistoryRecord(
+                incident_id=row.get("incident_id", ""),
+                primary_service=row.get("primary_service", ""),
+                root_cause_service=row.get("root_cause_service"),
+                status=row.get("status"),
+                error_type=error_type,
+                final_resolution=row.get("final_resolution"),
+                fix_action=row.get("fix_action", ""),
+                feedback=row.get("feedback"),
+                result=row.get("result"),
+                service_names=row.get("service_names", []),
+                timestamp=row.get("timestamp"),
+            )
+            for row in records
+            if row.get("incident_id") and row.get("fix_action")
+        ]
 
     def _service_operations(
         self,

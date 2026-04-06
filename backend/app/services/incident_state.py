@@ -69,7 +69,12 @@ class IncidentStateService:
             )
             incident.resolution_steps.append(resolution_step)
             incident.notes = request.notes or incident.notes
-            self._neo4j.sync_incident_fix(incident.id, incident.id, incident.propagation_path, resolution_step)
+            self._neo4j.sync_incident_fix(
+                incident.id,
+                incident.source_trace_id or incident.id,
+                incident.propagation_path,
+                resolution_step,
+            )
 
             if request.final_resolution:
                 incident.status = "resolved"
@@ -88,7 +93,12 @@ class IncidentStateService:
                 )
                 self._active.pop(incident.id, None)
                 self._resolved[incident.id] = incident
-                self._neo4j.sync_incident_resolution(incident.id, incident.id, incident.propagation_path, incident)
+                self._neo4j.sync_incident_resolution(
+                    incident.id,
+                    incident.source_trace_id or incident.id,
+                    incident.propagation_path,
+                    incident,
+                )
             else:
                 self._active[incident.id] = incident
 
@@ -152,6 +162,7 @@ class IncidentStateService:
             notes=". ".join(request.incident_hints) if request.incident_hints else None,
             confidence=response.confidence_score,
             recommendations=narrative.recommended_actions or response.solutions,
+            recommendation_details=narrative.recommendation_details or response.recommendation_details,
             similar_incidents=self._similar_incidents(incident_matches),
         )
 

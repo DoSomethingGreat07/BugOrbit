@@ -36,7 +36,7 @@ class RocketRideOrchestrator:
             ]
         ).strip()
         incident_matches = self.rag_resolver.search(incident_query)
-        root_cause, solutions, confidence = self.rag_resolver.synthesize(
+        root_cause, solutions, recommendation_details, confidence = self.rag_resolver.synthesize(
             structured_trace,
             trace_analysis,
             graph_result,
@@ -51,6 +51,7 @@ class RocketRideOrchestrator:
             incident_matches,
             root_cause,
             solutions,
+            recommendation_details,
         )
         self.neo4j.sync_analysis_graph(
             structured_trace,
@@ -71,6 +72,7 @@ class RocketRideOrchestrator:
             incident_matches=incident_matches,
             root_cause=root_cause,
             solutions=solutions,
+            recommendation_details=recommendation_details,
             confidence_score=confidence,
             narrative=narrative,
         )

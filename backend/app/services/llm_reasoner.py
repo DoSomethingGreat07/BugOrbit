@@ -6,7 +6,14 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
-from app.models.schemas import GraphQueryResult, IncidentRecord, ImpactAnalysis, StructuredTrace, TraceAnalysis
+from app.models.schemas import (
+    GraphFixHistoryRecord,
+    GraphQueryResult,
+    ImpactAnalysis,
+    IncidentRecord,
+    StructuredTrace,
+    TraceAnalysis,
+)
 
 
 class OpenAIReasoningService:
@@ -20,6 +27,7 @@ class OpenAIReasoningService:
         graph_result: GraphQueryResult,
         impact_analysis: ImpactAnalysis,
         incident_matches: list[IncidentRecord],
+        graph_fix_history: list[GraphFixHistoryRecord],
     ) -> tuple[str, list[str], float] | None:
         if not self.is_enabled():
             return None
@@ -51,6 +59,7 @@ class OpenAIReasoningService:
                                 graph_result,
                                 impact_analysis,
                                 incident_matches,
+                                graph_fix_history,
                             ),
                         }
                     ],
@@ -124,6 +133,7 @@ class OpenAIReasoningService:
         graph_result: GraphQueryResult,
         impact_analysis: ImpactAnalysis,
         incident_matches: list[IncidentRecord],
+        graph_fix_history: list[GraphFixHistoryRecord],
     ) -> str:
         evidence = {
             "structured_trace": {
@@ -139,10 +149,12 @@ class OpenAIReasoningService:
             "graph_result": graph_result.model_dump(),
             "impact_analysis": impact_analysis.model_dump(),
             "incident_matches": [incident.model_dump() for incident in incident_matches],
+            "graph_fix_history": [record.model_dump() for record in graph_fix_history],
         }
         return (
             "Analyze this incident and infer the most likely root cause. "
-            "Prefer causes supported by correlated telemetry and similar incidents. "
+            "Prefer causes supported by correlated telemetry, similar incidents, and graph-linked historical fix outcomes. "
+            "Weight repeated successful fix actions higher than one-off actions when they fit the current evidence. "
             "Return 2-4 actionable remediations.\n\n"
             f"{json.dumps(evidence, indent=2)}"
         )

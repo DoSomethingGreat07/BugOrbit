@@ -246,6 +246,26 @@ class IncidentSearchResponse(BaseModel):
     matches: list[IncidentRecord]
 
 
+class GraphFixHistoryRecord(BaseModel):
+    incident_id: str
+    primary_service: str
+    root_cause_service: str | None = None
+    status: str | None = None
+    error_type: str | None = None
+    final_resolution: str | None = None
+    fix_action: str
+    feedback: str | None = None
+    result: str | None = None
+    service_names: list[str] = Field(default_factory=list)
+    timestamp: str | None = None
+
+
+class RecommendationItem(BaseModel):
+    text: str
+    source: str
+    evidence_incident_id: str | None = None
+
+
 class ServiceImpact(BaseModel):
     service: str
     impact: str
@@ -258,6 +278,7 @@ class AnalysisNarrative(BaseModel):
     likely_cause_chain: list[str]
     service_impacts: list[ServiceImpact] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
+    recommendation_details: list[RecommendationItem] = Field(default_factory=list)
 
 
 class FinalAnalysisResponse(BaseModel):
@@ -268,6 +289,7 @@ class FinalAnalysisResponse(BaseModel):
     incident_matches: list[IncidentRecord]
     root_cause: str
     solutions: list[str]
+    recommendation_details: list[RecommendationItem] = Field(default_factory=list)
     confidence_score: float
     narrative: AnalysisNarrative
 
@@ -339,6 +361,7 @@ class RuntimeIncidentRecord(BaseModel):
     notes: str | None = None
     confidence: float
     recommendations: list[str] = Field(default_factory=list)
+    recommendation_details: list[RecommendationItem] = Field(default_factory=list)
     similar_incidents: list[RuntimeSimilarIncident] = Field(default_factory=list)
 
 

@@ -98,6 +98,11 @@ type IncidentRecord = {
   notes?: string;
   confidence: number;
   recommendations: string[];
+  recommendationDetails: Array<{
+    text: string;
+    source: string;
+    evidenceIncidentId?: string;
+  }>;
   similarIncidents: Array<{
     id: string;
     resolution: string;
@@ -106,6 +111,38 @@ type IncidentRecord = {
     successfulFix: string;
   }>;
 };
+
+function recommendationSourceLabel(source: string) {
+  if (source === "graph_history") return "Graph Memory";
+  if (source === "incident_memory") return "Incident Memory";
+  return "AI Recommendation";
+}
+
+function recommendationSourceRank(source: string) {
+  if (source === "graph_history") return 0;
+  if (source === "incident_memory") return 1;
+  return 2;
+}
+
+function getRecommendationDisplayItems(incident: IncidentRecord | null) {
+  if (!incident) {
+    return [{ text: "No recommendations available yet.", source: "llm" }];
+  }
+
+  const explicit = incident.recommendationDetails.filter((item) => item.text?.trim());
+  if (explicit.length > 0) {
+    return [...explicit].sort((left, right) => {
+      const rankDiff = recommendationSourceRank(left.source) - recommendationSourceRank(right.source);
+      return rankDiff !== 0 ? rankDiff : left.text.localeCompare(right.text);
+    });
+  }
+
+  const fallback = incident.recommendations.filter((item) => item.trim()).map((text) => ({
+    text,
+    source: "llm",
+  }));
+  return fallback.length > 0 ? fallback : [{ text: "No recommendations available yet.", source: "llm" }];
+}
 
 type SimulationScenario = {
   service: string;
@@ -485,6 +522,12 @@ const resolvedIncidentSeed: IncidentRecord[] = [
       "Tighten retry budgets, lower saturation alert thresholds, and gate canaries on ledger pool health.",
     confidence: 0.94,
     recommendations: ["Rollback deployment", "Increase pool capacity", "Add circuit breaker", "Tune retry budget"],
+    recommendationDetails: [
+      { text: "Rollback deployment", source: "incident_memory", evidenceIncidentId: "INC-1987" },
+      { text: "Increase pool capacity", source: "graph_history", evidenceIncidentId: "INC-2048" },
+      { text: "Add circuit breaker", source: "llm" },
+      { text: "Tune retry budget", source: "llm" }
+    ],
     similarIncidents: [
       {
         id: "INC-1987",
@@ -593,6 +636,11 @@ const resolvedIncidentSeed: IncidentRecord[] = [
     notes: "Add compaction-aware autoscaling and shift settlement windows away from compaction.",
     confidence: 0.89,
     recommendations: ["Scale writers", "Shift compaction window", "Add queue depth alert"],
+    recommendationDetails: [
+      { text: "Scale writers", source: "graph_history", evidenceIncidentId: "INC-1987" },
+      { text: "Shift compaction window", source: "incident_memory", evidenceIncidentId: "INC-1987" },
+      { text: "Add queue depth alert", source: "llm" }
+    ],
     similarIncidents: [
       {
         id: "INC-2048",
@@ -905,6 +953,21 @@ function buildCurrentIncident(
     notes: payload.incident_hints?.join(". "),
     confidence: result.confidence_score,
     recommendations: result.narrative?.recommended_actions ?? result.solutions,
+    recommendationDetails:
+      result.narrative?.recommendation_details?.map((item) => ({
+        text: item.text,
+        source: item.source,
+        evidenceIncidentId: item.evidence_incident_id ?? undefined
+      })) ??
+      result.recommendation_details?.map((item) => ({
+        text: item.text,
+        source: item.source,
+        evidenceIncidentId: item.evidence_incident_id ?? undefined
+      })) ??
+      (result.narrative?.recommended_actions ?? result.solutions).map((text) => ({
+        text,
+        source: "llm"
+      })),
     similarIncidents: result.incident_matches.map((incident) => ({
       id: incident.incident_id,
       resolution: incident.fix[0] ?? incident.root_cause,
@@ -963,6 +1026,12 @@ function mapRuntimeIncident(incident: RuntimeIncidentRecord): IncidentRecord {
     notes: incident.notes ?? undefined,
     confidence: incident.confidence,
     recommendations: incident.recommendations,
+    recommendationDetails:
+      incident.recommendation_details?.map((item) => ({
+        text: item.text,
+        source: item.source,
+        evidenceIncidentId: item.evidence_incident_id ?? undefined
+      })) ?? incident.recommendations.map((text) => ({ text, source: "llm" })),
     similarIncidents: incident.similar_incidents.map((item) => ({
       id: item.id,
       resolution: item.resolution,
@@ -1884,8 +1953,18 @@ function App() {
               </div>
             </div>
             <ol className="fix-recommendations">
-              {(displayedIncident?.recommendations ?? ["Run BugOrbit analysis to surface recommended fixes."]).map((item) => (
-                <li key={item}>{item}</li>
+              {(displayedIncident
+                ? getRecommendationDisplayItems(displayedIncident)
+                : [{ text: "Run BugOrbit analysis to surface recommended fixes.", source: "llm" }]).map((item) => (
+                <li key={`${item.source}-${item.text}`}>
+                  <div className="fix-recommendation__content">
+                    <span>{item.text}</span>
+                    <div className="fix-recommendation__meta">
+                      <small className="history-pill">{recommendationSourceLabel(item.source)}</small>
+                      {item.evidenceIncidentId ? <small className="history-pill">{item.evidenceIncidentId}</small> : null}
+                    </div>
+                  </div>
+                </li>
               ))}
             </ol>
             <div className="step-tracker">
@@ -2727,8 +2806,16 @@ function App() {
           "fixes",
           "Recommended Fixes",
           <ul className="fix-recommendations">
-            {(displayedIncident?.recommendations ?? ["No recommendations available yet."]).map((item) => (
-              <li key={item}>{item}</li>
+            {getRecommendationDisplayItems(displayedIncident).map((item) => (
+              <li key={`${item.source}-${item.text}`}>
+                <div className="fix-recommendation__content">
+                  <span>{item.text}</span>
+                  <div className="fix-recommendation__meta">
+                    <small className="history-pill">{recommendationSourceLabel(item.source)}</small>
+                    {item.evidenceIncidentId ? <small className="history-pill">{item.evidenceIncidentId}</small> : null}
+                  </div>
+                </div>
+              </li>
             ))}
           </ul>
         )}

@@ -162,6 +162,11 @@ export type FinalAnalysisResponse = {
   }>;
   root_cause: string;
   solutions: string[];
+  recommendation_details?: Array<{
+    text: string;
+    source: string;
+    evidence_incident_id?: string | null;
+  }>;
   confidence_score: number;
   narrative?: {
     executive_summary: string;
@@ -173,6 +178,11 @@ export type FinalAnalysisResponse = {
       evidence: string[];
     }>;
     recommended_actions: string[];
+    recommendation_details?: Array<{
+      text: string;
+      source: string;
+      evidence_incident_id?: string | null;
+    }>;
   };
 };
 
@@ -243,6 +253,11 @@ export type RuntimeIncidentRecord = {
   notes?: string | null;
   confidence: number;
   recommendations: string[];
+  recommendation_details?: Array<{
+    text: string;
+    source: string;
+    evidence_incident_id?: string | null;
+  }>;
   similar_incidents: RuntimeSimilarIncident[];
 };
 

@@ -1003,6 +1003,18 @@ textarea {
   box-shadow: 0 0 0 4px rgba(255, 139, 66, 0.12);
 }
 
+.fix-recommendation__content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fix-recommendation__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .simulation-recommendations h4 {
   margin: 0 0 10px;
   font-size: 0.95rem;

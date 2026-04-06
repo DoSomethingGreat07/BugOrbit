@@ -5,6 +5,7 @@ from app.models.schemas import (
     GraphQueryResult,
     ImpactAnalysis,
     IncidentRecord,
+    RecommendationItem,
     ServiceImpact,
     StructuredTrace,
     TraceAnalysis,
@@ -21,6 +22,7 @@ class NarrativeBuilderService:
         incident_matches: list[IncidentRecord],
         root_cause: str,
         solutions: list[str],
+        recommendation_details: list[RecommendationItem],
     ) -> AnalysisNarrative:
         impacted = impact_analysis.blast_radius or [structured_trace.root_service]
         executive_summary = (
@@ -71,6 +73,7 @@ class NarrativeBuilderService:
             likely_cause_chain=likely_cause_chain,
             service_impacts=service_impacts,
             recommended_actions=recommended_actions,
+            recommendation_details=recommendation_details,
         )
 
     def _build_service_impacts(
